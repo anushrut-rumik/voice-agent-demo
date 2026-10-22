@@ -1,0 +1,37 @@
+{
+  "fictional_demo_data": true,
+  "invoices": {
+    "DEMO-RAHUL": {
+      "customer": "rahul",
+      "amount_paise": 1800000,
+      "description": "200 corrugated packing cartons at INR 70 each and 80 rolls of packing tape at INR 50 each, supplied for Sharma Trading Co.'s dispatch work",
+      "invoice_date": "2026-10-09",
+      "supplied_on": "2026-10-09",
+      "due_date": "2026-10-16"
+    },
+    "DEMO-PRIYA": {
+      "customer": "priya",
+      "amount_paise": 3250000,
+      "description": "1,000 paper shopping bags at INR 25 each and 500 printed product labels at INR 15 each, supplied for Mehta Retail's store",
+      "invoice_date": "2026-10-10",
+      "supplied_on": "2026-10-10",
+      "due_date": "2026-10-17"
+    },
+    "DEMO-ARJUN": {
+      "customer": "arjun",
+      "amount_paise": 850000,
+      "description": "100 packing boxes at INR 60 each and 50 rolls of packing tape at INR 50 each, supplied for Patel Distributors' parcel dispatches",
+      "invoice_date": "2026-10-12",
+      "supplied_on": "2026-10-12",
+      "due_date": "2026-10-23"
+    },
+    "DEMO-NEHA": {
+      "customer": "neha",
+      "amount_paise": 350000,
+      "description": "50 presentation folders at INR 40 each and 30 notepads at INR 50 each, supplied for Kapoor Studio",
+      "invoice_date": "2026-10-14",
+      "supplied_on": "2026-10-14",
+      "due_date": "2026-10-24"
+    }
+  }
+}
