@@ -92,10 +92,11 @@ class ReminderRuns:
 
     def state(self, db):
         at = self.h.clock(db)
-        due = self.due(db, at)
+        candidates = self.due(db, at, include_future=True)
         run = db.execute("SELECT * FROM reminder_runs ORDER BY rowid DESC LIMIT 1").fetchone()
-        result = {'ready_count':sum(bool(r['phone']) for r in due),
-                  'missing_phone_count':sum(not r['phone'] for r in due),
+        result = {'ready_count':sum(bool(r['phone']) and datetime.fromisoformat(r['due_at']) <= at for r in candidates),
+                  'callable_count':sum(bool(r['phone']) for r in candidates),
+                  'missing_phone_count':sum(not r['phone'] for r in candidates),
                   'configured':bool(self.h.api_key and self.h.extraction.client.key and self.h.callbacks_enabled),
                   'local_only':not self.h.callbacks_enabled,
                   'run':None, 'model':self.h.extraction.client.model}
@@ -130,13 +131,13 @@ class ReminderRuns:
                 if scope:
                     customer=self.h.customer(db,scope)
                     if not customer['phone']:raise HTTPException(409,'Add this customer’s phone number before calling.')
-                # Selecting one customer explicitly authorizes an early call.
-                # Keep the saved schedule intact until that call actually starts.
-                # Bulk runs continue to include only customers due now.
-                due = [r for r in self.due(db,self.h.clock(db),body.customer_id,include_future=bool(scope)) if r['phone']]
+                # Both Call all and Call now are explicit requests to call now,
+                # even when the next follow-up is scheduled for a later date.
+                # Preserve saved schedules until the calls actually start.
+                due = [r for r in self.due(db,self.h.clock(db),body.customer_id,include_future=True) if r['phone']]
                 if not due:
                     if scope:raise HTTPException(409,'This customer cannot receive a reminder. Check their balance, account status and any saved stop request.')
-                    raise HTTPException(409,'No customers are due yet. Use Call now on an individual customer to call before their next follow-up.')
+                    raise HTTPException(409,'No customers can be called. Add a saved phone number and unpaid bill, and check account holds or stop requests.')
                 rid = str(uuid4())
                 db.execute('INSERT INTO reminder_runs(id,request_id,scope,status,starts_at,created_at) VALUES(?,?,?,?,?,?)',
                            (rid,str(body.request_id),scope,'running',self.h.clock(db).isoformat(),now().isoformat()))

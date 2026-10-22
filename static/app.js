@@ -29,9 +29,9 @@ function statusLabel(c){
 function renderRun(){
  const reminders=state.reminders||{},run=reminders.run,open=run&&['running','paused','stopping'].includes(run.status);
  const primary=$('#start-reminders'),secondary=$('#pause-reminders');
- primary.textContent=busy?'Working…':run?.status==='paused'?'Resume run':'Call all due';
+ primary.textContent=busy?'Working…':run?.status==='paused'?'Resume run':'Call all';
  const activeCall=state.customers?.some(c=>c.calls.some(x=>!terminal(x.status)));
- primary.disabled=busy||!!(open&&run.status!=='paused')||(!open&&(!reminders.ready_count||activeCall||reminders.local_only));
+ primary.disabled=!!(busy||(open&&run.status!=='paused')||(!open&&(activeCall||reminders.local_only)));
  secondary.hidden=!open;secondary.disabled=busy||run?.status==='stopping';secondary.textContent=run?.status==='paused'?'End run':'Pause';
  let text='Asha calls customers, saves a brief, and updates the next step.';
  if(open){
@@ -41,11 +41,10 @@ function renderRun(){
        new Date(run.starts_at)>new Date(state.clock)?'Starts '+date(run.starts_at)+' IST · '+run.total+' customer'+(run.total===1?'':'s'):
        !run.setup_checked&&!current?'Connecting Asha. Calls will begin shortly.':
        `${run.finished} of ${run.total} finished${current?' · '+(current.status==='summarizing'?'Saving brief for ':current.status==='uncertain'?'Checking connection for ':'Calling ')+current.name:''}`;
- }else if(run?.status==='completed'&&reminders.ready_count)text=`Last run finished · ${run.finished} of ${run.total} customers. ${reminders.ready_count} due now.`;
- else if(reminders.ready_count)text=reminders.ready_count+' customer'+(reminders.ready_count===1?' is':'s are')+' ready. Asha will call now, then save a brief and next step.';
- else if(state.customers?.some(c=>c.phone&&c.status==='active'&&!c.contact_blocked&&c.balance>c.threshold))text='No calls are due yet. Use Call now on a customer to call again before their next follow-up.';
- else if(reminders.missing_phone_count)text='Add phone numbers in your file to get '+reminders.missing_phone_count+' due customer'+(reminders.missing_phone_count===1?'':'s')+' ready.';
- else text='No customers are due. Add customer contacts and unpaid bills to get started.';
+ }else if(run?.status==='completed')text=`Last run finished · ${run.finished} of ${run.total} customers. Call all to run everyone again, or use Call now for one customer.`;
+ else if(reminders.callable_count)text=reminders.callable_count+' customer'+(reminders.callable_count===1?' is':'s are')+' ready. Call all starts one pass now, including scheduled follow-ups.';
+ else if(reminders.missing_phone_count)text='Add phone numbers to get '+reminders.missing_phone_count+' customer'+(reminders.missing_phone_count===1?'':'s')+' ready for calling.';
+ else text='Call all starts a full run. Add customer contacts and unpaid bills to get started.';
  if(reminders.local_only&&!open)text='Local preview · Connect Asha to enable phone reminders.';
  $('#run-description').textContent=text;
  $('#connection-label').textContent=reminders.local_only?'Local preview':state.voice_configured?'Asha configured':'Agent setup needed';

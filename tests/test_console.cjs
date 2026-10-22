@@ -76,17 +76,29 @@ test('a lost individual response keeps the request ID per customer and cannot ca
   assert.equal(attempts[1].customer_id,'rahul');assert.equal(ids,2);
  })()`,c);
 });
-test('future follow-ups offer Call now while the empty bulk queue is explained without an error',()=>{
+test('Call all and Call now both remain available when all follow-ups are in the future',()=>{
  const c=consoleContext();vm.runInContext(`
   const account={id:'priya',name:'Priya',status:'active',balance:32500,threshold:5000,phone:'+12025550101',calls:[],job:{status:'scheduled',due_at:'2026-10-26T10:00:00+05:30'}};
   state={customers:[account],voice_configured:true,reminders:{ready_count:0,run:{status:'completed',finished:1,total:1}}};
   renderRun();renderDecision(account,null);
-  assert.equal(document.querySelector('#start-reminders').textContent,'Call all due');
-  assert.equal(document.querySelector('#start-reminders').disabled,true);
-  assert.match(document.querySelector('#run-description').textContent,/No calls are due yet.*Call now/);
+  assert.equal(document.querySelector('#start-reminders').textContent,'Call all');
+  assert.equal(document.querySelector('#start-reminders').disabled,false);
+  assert.match(document.querySelector('#run-description').textContent,/Call all to run everyone again/);
+  assert.doesNotMatch(document.querySelector('#run-description').textContent,/No calls are due/);
   assert.match(document.querySelector('#call-result').innerHTML,/Call Priya now/);
   assert.doesNotMatch(document.querySelector('#call-result').innerHTML,/disabled/);
  `,c);
+});
+test('a deliberate repeat bulk run gets a new request even with zero due customers',async()=>{
+ const c=consoleContext();await vm.runInContext(`(async()=>{
+  let ids=0,attempts=[];crypto={randomUUID:()=> 'bulk-'+(++ids)};
+  state={reminders:{ready_count:0,callable_count:2,run:{status:'completed'}}};
+  renderRun=()=>{};refresh=async()=>{};
+  api=async(path,body)=>{assert.equal(path,'reminders/start');attempts.push(body);};
+  await startReminders();await startReminders();
+  assert.equal(attempts.length,2);assert.notEqual(attempts[0].request_id,attempts[1].request_id);
+  assert.equal(attempts[0].customer_id,undefined);assert.equal(attempts[1].customer_id,undefined);
+ })()`,c);
 });
 test('individual call is disabled during another call and hidden for paid or stopped accounts',()=>{
  const c=consoleContext();vm.runInContext(`

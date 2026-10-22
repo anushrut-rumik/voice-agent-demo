@@ -26,7 +26,7 @@
       "config": {
         "action": "get",
         "method": "GET",
-        "url": "https://cleveland-tap-birth-architects.trycloudflare.com/voice/reminders/context",
+        "url": "https://quantitative-picture-convert-philip.trycloudflare.com/voice/reminders/context",
         "auth": {
           "type": "bearer",
           "token": "REPLACE_WITH_REMINDER_TOOL_TOKEN"
@@ -113,7 +113,7 @@
       "config": {
         "action": "get",
         "method": "GET",
-        "url": "https://cleveland-tap-birth-architects.trycloudflare.com/voice/reminders/balance",
+        "url": "https://quantitative-picture-convert-philip.trycloudflare.com/voice/reminders/balance",
         "auth": {
           "type": "bearer",
           "token": "REPLACE_WITH_REMINDER_TOOL_TOKEN"
@@ -168,7 +168,7 @@
       "config": {
         "action": "post",
         "method": "POST",
-        "url": "https://cleveland-tap-birth-architects.trycloudflare.com/voice/reminders/outcomes",
+        "url": "https://quantitative-picture-convert-philip.trycloudflare.com/voice/reminders/outcomes",
         "auth": {
           "type": "bearer",
           "token": "REPLACE_WITH_REMINDER_TOOL_TOKEN"

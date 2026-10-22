@@ -109,7 +109,7 @@ def main():
                 time.sleep(.1)
         wait_local('http://127.0.0.1:8766/api/state',console,auth)
         print('Asha CRM is ready at http://127.0.0.1:8766',flush=True)
-        print('Local-only mode: no public connection or remote settings were changed.' if args.local_only else 'Customer tools are connected. Save customer numbers, then click Call all due for one pass. No run was started by this launcher.',flush=True)
+        print('Local-only mode: no public connection or remote settings were changed.' if args.local_only else 'Customer tools are connected. Save customer numbers, then click Call all for one pass. No run was started by this launcher.',flush=True)
         while all(child.poll() is None for child in children):time.sleep(1)
         raise RuntimeError('A CRM service stopped. See .local/crm-logs. Saved attempts remain available for recovery.')
     except KeyboardInterrupt:pass

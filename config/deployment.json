@@ -13,7 +13,7 @@
     "pm_record_reminder_outcome"
   ],
   "boundVariableCount": 13,
-  "backendUrl": "https://cleveland-tap-birth-architects.trycloudflare.com",
+  "backendUrl": "https://quantitative-picture-convert-philip.trycloudflare.com",
   "backendLifetime": "Temporary: requires local server and Cloudflare tunnel to remain running",
   "localTestsPassed": 52,
   "publicHttpsSmokeTestPassed": true,
@@ -113,8 +113,8 @@
     "localPreviewOnly": false,
     "persistentCallbackApprovalPending": false,
     "extraLiveCallsPlaced": 0,
-    "pythonTestsPassed": 127,
-    "consoleTestsPassed": 10,
+    "pythonTestsPassed": 128,
+    "consoleTestsPassed": 11,
     "persistentCallbackApproved": true,
     "callbackConnectionVerified": true,
     "callbackVerifiedAt": "2026-10-22T17:44:19.793110+00:00",
@@ -123,9 +123,11 @@
     "importUXVerification": ".local/import-ux-20261023/verification.json",
     "individualCustomerCalls": true,
     "manualCallsBeforeFollowup": true,
-    "bulkCallsOnlyWhenDue": true,
+    "bulkCallsOnlyWhenDue": false,
     "individualCallVerification": ".local/individual-calls-20261023/browser-verification.json",
-    "liveIndividualCallPlacedThisSession": false
+    "liveIndividualCallPlacedThisSession": false,
+    "manualBulkCallsIgnoreFollowupDates": true,
+    "bulkRerunVerification": ".local/repeat-all-20261023/browser-verification.json"
   },
   "promptVersion8DeployedAt": "2026-10-22T20:14:54.715384+00:00",
   "promptVersion8DeploymentVerifiedViaAPI": true,

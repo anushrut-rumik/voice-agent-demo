@@ -139,11 +139,31 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.snapshot()['run']['status'],'completed')
         self.assertEqual(self.snapshot()['run']['items'][0]['status'],'skipped')
 
-    async def test_bulk_still_excludes_future_follow_ups(self):
+    async def test_bulk_includes_future_follow_ups(self):
         with self.h.store.connect() as db:
             db.execute("UPDATE demo_jobs SET due_at=? WHERE customer='priya'",((self.at+timedelta(days=3)).isoformat(),))
-        run=await self.start();self.assertEqual(run['queued'],2)
-        self.assertNotIn('priya',[i['customer'] for i in self.snapshot()['run']['items']])
+        run=await self.start();self.assertEqual(run['queued'],3)
+        self.assertIn('priya',[i['customer'] for i in self.snapshot()['run']['items']])
+
+    async def test_completed_bulk_run_can_repeat_every_customer_when_none_are_due(self):
+        first=await self.start()
+        for _ in range(3):
+            await self.r.step();await self.finish()
+        await self.r.step()
+        self.assertEqual(self.snapshot()['run']['status'],'completed')
+        self.assertEqual(self.snapshot()['ready_count'],0)
+        self.assertEqual(self.snapshot()['callable_count'],3)
+        second=await self.start()
+        self.assertNotEqual(first['id'],second['id'])
+        self.assertEqual(second['queued'],3)
+        for _ in range(3):
+            await self.r.step();await self.finish()
+        await self.r.step()
+        self.assertEqual(len(self.dials),6)
+        self.assertEqual(len({d[0] for d in self.dials}),6)
+        for name in ('Rahul Sharma','Priya Mehta','Arjun Patel'):
+            self.assertEqual(sum(d[2]['customer_name']==name for d in self.dials),2)
+        self.assertEqual(self.snapshot()['run']['status'],'completed')
 
     async def test_individual_api_queues_one_saved_contact_without_dialing_on_request(self):
         self.r.contact('rahul','')
@@ -170,12 +190,14 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
             await self.r.start(RunRequest(request_id=uuid4(),customer_id='priya'))
         self.assertEqual(len(self.dials),1)
 
-    async def test_paid_stopped_future_and_missing_contact_accounts_are_excluded(self):
+    async def test_stopped_and_missing_contacts_are_excluded_but_future_accounts_are_included(self):
         self.r.contact('rahul','')
         with self.h.store.connect() as db:
             db.execute("UPDATE demo_customers SET status='suppressed' WHERE id='priya'")
             db.execute("UPDATE demo_jobs SET status='scheduled',due_at=? WHERE customer='arjun'",((self.at+timedelta(days=2)).isoformat(),))
-        with self.assertRaises(HTTPException):await self.start()
+        run=await self.start()
+        self.assertEqual(run['queued'],1)
+        self.assertEqual(self.snapshot()['run']['items'][0]['customer'],'arjun')
         self.assertEqual(self.snapshot()['missing_phone_count'],1)
         self.assertEqual(self.dials,[])
 
