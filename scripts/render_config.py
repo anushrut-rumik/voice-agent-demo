@@ -28,7 +28,7 @@ def render(base):
             "llmParams": [{"name":k,"type":"string","description":v,"required":True} for k,v in (llm or {}).items()],
             "outputs": [{"name":x,"path":x} for x in outputs]}}
     ctx = tool("pm_get_reminder_context", "before_call", "GET", "/voice/reminders/context",
-               "Load verified context for the prepared payment reminder dispatch; return unavailable on an ambiguous or missing match.",
+               "Load this customer's dated conversation brief, payment promises, reconciled receipts and relevant customer statements for the prepared dispatch. Return unavailable on a missing or ambiguous match.",
                {"phone_number":"{phone_number}","agent_id":"{agent_id}","call_id":"{call_id}"}, FIELDS)
     refresh = tool("pm_refresh_reminder_balance", "during_call", "GET", "/voice/reminders/balance",
                    "Read the latest recorded balance when the customer reports a payment or questions the current amount. Never creates a payment.",
@@ -36,7 +36,7 @@ def render(base):
                    ["context_status","case_status","outstanding_amount","currency","balance_as_of","payment_status"])
     body = {"case_token":"{pm_case_token}","call_id":"{call_id}",**{k:"{"+k+"}" for k in PARAMS}}
     record = tool("pm_record_reminder_outcome", "during_call", "POST", "/voice/reminders/outcomes",
-                  "Record established conversation facts promptly. Unknown fields are empty. This does not verify payment or guarantee a callback. Read the result before claiming success.",
+                  "Record established facts. Before saving a firm payment plan, read back the amount and timing and wait for customer confirmation. Saving does not end the conversation: say a spoken farewell and allow acknowledgement before end_call. Respect stop requests immediately. Unknown fields stay empty; this does not verify payment or guarantee a callback. Read the result before claiming success.",
                   {}, ["save_status","case_status","action_status","scheduled_callback_at"], PARAMS, json.dumps(body))
     prompt = (ROOT/"config/system-prompt.txt").read_text().strip()
     if len(prompt)>8000:

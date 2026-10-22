@@ -144,6 +144,7 @@ class AnalysisTests(unittest.TestCase):
         def success(request):
             body=json.loads(request.content)
             self.assertIn('responseJsonSchema',body['generationConfig'])
+            self.assertIn('customer_details',body['generationConfig']['responseJsonSchema']['properties'])
             self.assertEqual(body['generationConfig']['thinkingConfig']['thinkingLevel'],'LOW')
             return httpx.Response(200,json={'candidates':[{'finishReason':'STOP','content':{'parts':[{'text':answer().model_dump_json()}]}}],'responseId':'provider-test'})
         with patch('payment_reminder.analysis.httpx.AsyncClient',return_value=httpx.AsyncClient(transport=httpx.MockTransport(success))):

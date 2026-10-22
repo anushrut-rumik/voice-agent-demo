@@ -13,7 +13,7 @@
     "pm_record_reminder_outcome"
   ],
   "boundVariableCount": 13,
-  "backendUrl": "https://veterans-dream-outline-rid.trycloudflare.com",
+  "backendUrl": "https://cleveland-tap-birth-architects.trycloudflare.com",
   "backendLifetime": "Temporary: requires local server and Cloudflare tunnel to remain running",
   "localTestsPassed": 52,
   "publicHttpsSmokeTestPassed": true,
@@ -28,7 +28,7 @@
   "consoleMode": "live-only",
   "liveAcceptanceCallId": "01a15289-d1ff-7405-83d4-1fb91e1e39e9",
   "liveAcceptanceOutcome": "no_commitment",
-  "activePromptVersion": 8,
+  "activePromptVersion": 9,
   "promptVersion2SpokenRetest": false,
   "adminConsole": true,
   "promptVersion3SpokenRetest": true,
@@ -113,7 +113,7 @@
     "localPreviewOnly": false,
     "persistentCallbackApprovalPending": false,
     "extraLiveCallsPlaced": 0,
-    "pythonTestsPassed": 114,
+    "pythonTestsPassed": 127,
     "consoleTestsPassed": 10,
     "persistentCallbackApproved": true,
     "callbackConnectionVerified": true,
@@ -144,5 +144,22 @@
     "mode": "existing-hosted-greeting",
     "changedThisSession": false,
     "customerFirstVerified": false
+  },
+  "promptVersion9DeployedAt": "2026-10-22T20:35:46.968736+00:00",
+  "promptVersion9DeploymentVerifiedViaAPI": true,
+  "promptVersion9SpokenRetest": false,
+  "promptVersion9Sha256": "b120761c6052a88f059c236ea4fb0f3c8edaa805d887b59924ee165a0f4b4327",
+  "promptVersion9Characters": 7816,
+  "promptVersion9Evidence": ".local/customer-context-20261023/deployment-verification.json",
+  "customerContext": {
+    "version": 1,
+    "beforeCallModelRequest": false,
+    "voiceField": "pm_prior_contact_summary",
+    "recentConversationLimit": 6,
+    "datedCustomerQuotes": true,
+    "latestPromiseComparedWithReconciledReceipts": true,
+    "olderCallSnapshotsPreserved": true,
+    "syntheticGeminiCheckPassed": true,
+    "evidence": ".local/customer-context-20261023/synthetic-qualification.json"
   }
 }
