@@ -1,6 +1,7 @@
 'use strict';
 let state,selected=null,selectedCall=null,busy=false,entryKind='payment',runRequest=null,creatingCustomer=false,uploading=false,importReport=null;
 const customerCallRequests=new Map();
+let refreshPending=null;
 const $=s=>document.querySelector(s);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const inr=v=>new Intl.NumberFormat('en-IN',{style:'currency',currency:'INR',minimumFractionDigits:0,maximumFractionDigits:2}).format(v);
@@ -16,7 +17,11 @@ async function api(path,body){
  const r=await fetch('/api/'+path,{method:body===undefined?'GET':'POST',headers:{'Content-Type':'application/json','X-Demo-Console':'1'},...(body===undefined?{}:{body:JSON.stringify(body)})});
  const data=await r.json();if(!r.ok)throw new Error(typeof data.detail==='string'?data.detail:'Check the entered values and try again.');return data;
 }
-async function refresh(){state=await api('state');render();}
+async function refresh(force=false){
+ if(refreshPending){await refreshPending;if(force)return refresh(true);return;}
+ refreshPending=(async()=>{state=await api('state');render();})();
+ try{await refreshPending;}finally{refreshPending=null;}
+}
 function outcomeLabel(v){return ({promise_to_pay:'Payment expected',callback_requested:'Callback requested',payment_claimed:'Payment to verify',dispute:'Bill disputed',human_requested:'Help requested',do_not_call:'Calls stopped',wrong_number:'Wrong contact',no_commitment:'Payment timing not confirmed',unreachable:'Could not reach customer',setup_failed:'Customer details unavailable',call_completed:'Conversation completed',completed:'Call completed',failed:'Call could not connect',starting:'Starting call',calling:'Calling customer',running:'Conversation in progress',in_progress:'Conversation in progress',uncertain:'Checking call connection'})[v]||label(v)||'Awaiting outcome';}
 function statusLabel(c){
  const call=latest(c);
@@ -35,7 +40,7 @@ function renderRun(){
  secondary.hidden=!open;secondary.disabled=busy||run?.status==='stopping';secondary.textContent=run?.status==='paused'?'End run':'Pause';
  let text='Asha calls customers, saves a brief, and updates the next step.';
  if(open){
-  const current=run.items.find(x=>['calling','uncertain','dialing','summarizing'].includes(x.status));
+  const current=run.items.find(x=>['calling','uncertain','dialing'].includes(x.status))||run.items.find(x=>x.status==='summarizing');
   text=run.status==='paused'?'Run paused. '+(run.error||'Resume when you’re ready.'):
        run.status==='stopping'?'Finishing the current call. Remaining customers will not be called.':
        new Date(run.starts_at)>new Date(state.clock)?'Starts '+date(run.starts_at)+' IST · '+run.total+' customer'+(run.total===1?'':'s'):
@@ -120,8 +125,8 @@ async function callCustomer(){
   if(!customerCallRequests.has(cid))customerCallRequests.set(cid,{request_id:crypto.randomUUID(),customer_id:cid});
   await api('reminders/start',customerCallRequests.get(cid));
   customerCallRequests.delete(cid);
-  await refresh();
- }catch(e){error(e.message);try{await refresh();}catch{}}
+  await refresh(true);
+ }catch(e){error(e.message);try{await refresh(true);}catch{}}
  finally{busy=false;render();}
 }
 async function startReminders(){
@@ -133,8 +138,8 @@ async function startReminders(){
    if(!runRequest)runRequest={request_id:crypto.randomUUID()};
    await api('reminders/start',runRequest);
   }
-  runRequest=null;await refresh();
- }catch(e){error(e.message);try{await refresh();}catch{}}
+  runRequest=null;await refresh(true);
+ }catch(e){error(e.message);try{await refresh(true);}catch{}}
  finally{busy=false;renderRun();}
 }
 async function importFile(file){
@@ -147,7 +152,7 @@ async function importFile(file){
  try{
   const response=await fetch('/api/imports',{method:'POST',headers:{'X-Demo-Console':'1','X-Filename':encodeURIComponent(file.name),'Content-Type':'application/octet-stream'},body:file});
   const report=await response.json();if(!response.ok)throw new Error(typeof report.detail==='string'?report.detail:'The file could not be loaded. Try saving it as Excel or CSV.');
-  importReport=report;selected=report.customer_ids[0]||selected;selectedCall=null;await refresh();
+  importReport=report;selected=report.customer_ids[0]||selected;selectedCall=null;await refresh(true);
  }catch(e){error(e.message);$('#upload-title').textContent='Import Excel';$('#import-status').textContent='The file was not loaded. Check the message and try again.';}
  finally{busy=false;uploading=false;$('#upload-title').textContent='Import Excel';$('#choose-file').disabled=false;$('#customer-file').value='';renderRun();if(importReport)renderImport();}
 }
@@ -157,7 +162,7 @@ async function saveContact(){
   const phone=$('#contact-phone').value.trim();
   if(creatingCustomer){const added=await api('customers',{name:$('#contact-name').value.trim(),company:$('#contact-company').value.trim(),phone});selected=added.id;selectedCall=null;}
   else await api('customers/'+encodeURIComponent(selected)+'/contact',{phone});
-  $('#contact-dialog').close();await refresh();
+  $('#contact-dialog').close();await refresh(true);
  }
  catch(e){$('#contact-error').textContent=e.message;$('#contact-error').hidden=false;}
  finally{busy=false;$('#save-contact').disabled=false;}
@@ -185,16 +190,27 @@ document.addEventListener('click',async event=>{
  if(['edit-contact','add-customer'].includes(button.id)){creatingCustomer=button.id==='add-customer';$('#contact-title').textContent=creatingCustomer?'Add customer':'Customer contact';$('#save-contact').textContent=creatingCustomer?'Add customer':'Save contact';$('#contact-note').textContent=creatingCustomer?'Save their details once, then add an invoice. Asha will call only when you start reminders.':'Asha will use this number for the customer’s bill reminders. Leave it empty to remove it.';$('#new-customer-fields').hidden=!creatingCustomer;$('#contact-name').required=creatingCustomer;$('#contact-company').required=creatingCustomer;$('#contact-name').value='';$('#contact-company').value='';$('#contact-description').textContent=creatingCustomer?'Save their contact details, then add their invoice.':customer().name+' · '+customer().company;$('#contact-phone').value=creatingCustomer?'':customer().phone||'';$('#contact-error').hidden=true;$('#contact-dialog').showModal();}
  if(button.id==='start-reminders')await startReminders();
  if(button.id==='call-customer')await callCustomer();
- if(button.id==='pause-reminders'&&!busy){busy=true;try{const run=state.reminders.run;await api('reminders/'+encodeURIComponent(run.id)+'/'+(run.status==='paused'?'cancel':'pause'),{});await refresh();}catch(e){error(e.message);}finally{busy=false;renderRun();}}
+ if(button.id==='pause-reminders'&&!busy){busy=true;try{const run=state.reminders.run;await api('reminders/'+encodeURIComponent(run.id)+'/'+(run.status==='paused'?'cancel':'pause'),{});await refresh(true);}catch(e){error(e.message);}finally{busy=false;renderRun();}}
  if(button.id==='check-setup'){button.disabled=true;$('#setup-status').textContent='Checking connection…';try{await api('setup/check',{});$('#setup-status').textContent='Agent and customer-context connection are ready.';}catch(e){$('#setup-status').textContent=e.message;}finally{button.disabled=false;}}
  if(button.id==='load-recording'){const id=focusedCall(customer()).id;button.disabled=true;try{const data=await api('calls/'+encodeURIComponent(id)+'/recording');if(focusedCall(customer())?.id!==id)return;$('#recording-player').src=data.url;$('#recording-player').hidden=false;$('#recording-status').textContent='Recording ready';}catch(e){$('#recording-status').textContent=e.message;}finally{button.disabled=false;}}
- if(button.id==='retry-brief'){button.disabled=true;try{await api('calls/'+encodeURIComponent(focusedCall(customer()).id)+'/extract',{});await refresh();}catch(e){error(e.message);}finally{button.disabled=false;}}
+ if(button.id==='retry-brief'){button.disabled=true;try{await api('calls/'+encodeURIComponent(focusedCall(customer()).id)+'/extract',{});await refresh(true);}catch(e){error(e.message);}finally{button.disabled=false;}}
  if(['open-payment','open-invoice','open-first-invoice'].includes(button.id)){
   entryKind=button.id==='open-payment'?'payment':'invoice';const form=$('#entry-form');form.reset();form.elements.amount.value=entryKind==='payment'?customer().balance:'';
   $('#entry-title').textContent=entryKind==='payment'?'Record a reconciled payment':'Add an invoice';$('#entry-description').textContent=customer().name+' · '+customer().company;$('#save-entry').textContent='Save '+entryKind;$('#entry-error').hidden=true;$('#entry-dialog').showModal();
  }
  if(button.id==='close-entry')$('#entry-dialog').close();
 });
-$('#entry-form').addEventListener('submit',async event=>{event.preventDefault();const button=$('#save-entry'),form=event.currentTarget;button.disabled=true;try{await api(entryKind==='payment'?'payments':'invoices',{customer_id:selected,amount:form.elements.amount.value,reference:form.elements.reference.value.trim()});$('#entry-dialog').close();await refresh();}catch(e){$('#entry-error').textContent=e.message;$('#entry-error').hidden=false;}finally{button.disabled=false;}});
+$('#entry-form').addEventListener('submit',async event=>{event.preventDefault();const button=$('#save-entry'),form=event.currentTarget;button.disabled=true;try{await api(entryKind==='payment'?'payments':'invoices',{customer_id:selected,amount:form.elements.amount.value,reference:form.elements.reference.value.trim()});$('#entry-dialog').close();await refresh(true);}catch(e){$('#entry-error').textContent=e.message;$('#entry-error').hidden=false;}finally{button.disabled=false;}});
 refresh().catch(e=>error('The workspace could not load. '+e.message));
-setInterval(()=>{if(!busy)refresh().catch(e=>error('Connection to the server was lost. '+e.message));},3000);
+function refreshDelay(){
+ if(document.hidden)return 15000;
+ const open=['running','paused','stopping'].includes(state?.reminders?.run?.status);
+ const active=state?.customers?.some(c=>c.calls.some(x=>!terminal(x.status)));
+ return open||active?1000:3000;
+}
+async function pollWorkspace(){
+ try{if(!busy)await refresh();}catch(e){error('Connection to the server was lost. '+e.message);}
+ finally{setTimeout(pollWorkspace,refreshDelay());}
+}
+setTimeout(pollWorkspace,3000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!busy)refresh().catch(e=>error(e.message));});

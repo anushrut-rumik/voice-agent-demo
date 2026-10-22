@@ -69,6 +69,32 @@ class AnalysisTests(unittest.TestCase):
         with self.h.store.connect() as db:db.execute("UPDATE conversation_analyses SET next_attempt_at='' ")
         asyncio.run(self.p.run_next());self.assertEqual(self.status()['status'],'completed')
 
+    def test_no_commitment_without_quote_saves_conservative_brief_once(self):
+        self.call();self.p.discover()
+        result=answer().model_copy(update={'outcome':'no_commitment','promised_amount':'',
+            'payment_date_start':'','payment_date_end':'','payment_timeframe':'','evidence':[],
+            'summary':'Unsupported model interpretation','next_step':'Unsupported action'})
+        self.p.client.extract=AsyncMock(return_value=(result,{}))
+        asyncio.run(self.p.run_next());asyncio.run(self.p.run_next())
+        self.assertEqual(self.status()['status'],'completed')
+        self.assertEqual(self.p.client.extract.await_count,1)
+        self.assertEqual(self.customer()['calls'][0]['conversation_summary'],
+            'No confirmed payment plan was established in the available transcript.')
+
+    def test_positive_outcome_still_requires_customer_quote(self):
+        self.call();self.p.discover();result=answer()
+        result.evidence=[e for e in result.evidence if e.supports!='outcome']
+        self.p.client.extract=AsyncMock(return_value=(result,{}))
+        asyncio.run(self.p.run_next())
+        self.assertEqual(self.status()['status'],'retry_wait')
+        self.assertEqual(self.customer()['calls'][0]['outcome'],'call_completed')
+
+    def test_no_commitment_cannot_keep_conflicting_payment_plan(self):
+        self.call();self.p.discover();result=answer();result.outcome='no_commitment'
+        self.p.client.extract=AsyncMock(return_value=(result,{}))
+        asyncio.run(self.p.run_next())
+        self.assertEqual(self.status()['status'],'retry_wait')
+
     def test_failures_stop_at_three_attempts_without_a_review_gate(self):
         self.call();self.p.discover();self.p.client.extract=AsyncMock(side_effect=TemporaryFailure('Timed out'))
         for _ in range(4):

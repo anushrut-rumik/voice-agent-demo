@@ -100,6 +100,15 @@ class Harness:
         self.poll_error = ''
         self.lock = asyncio.Lock()
         self.poll_lock = asyncio.Lock()
+        self.poll_wake = asyncio.Event()
+        self.extraction_wake = asyncio.Event()
+        self.runs_wake = asyncio.Event()
+        self._upstream_client = None
+        self._worker_loop = None
+        self._call_polls = {}
+        self._status_slots = asyncio.Semaphore(4)
+        self._history_slots = asyncio.Semaphore(2)
+        self._status_errors = {}
         with self.store.connect() as db:
             db.executescript('''
             CREATE TABLE IF NOT EXISTS demo_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
@@ -332,6 +341,8 @@ class Harness:
             latest=db.execute("SELECT id FROM demo_calls WHERE customer=? ORDER BY rowid DESC LIMIT 1",(cid,)).fetchone()
             if latest['id']!=call_id and outcome not in ('do_not_call','wrong_number','dispute','payment_claimed','human_requested'):
                 db.execute('UPDATE demo_calls SET outcome=?,processed=1 WHERE id=?',(outcome,call_id))
+                self.wake(self.extraction_wake)
+                self.wake(self.runs_wake)
                 return
             if not body and call['status']=='completed' and not self.context_loaded(db,call_id):outcome='setup_failed'
             if outcome=='setup_failed':
@@ -363,6 +374,8 @@ class Harness:
             db.execute('UPDATE demo_calls SET outcome=?,processed=1 WHERE id=?',(outcome,call_id))
             self.log(db,cid,'Call processed · '+outcome.replace('_',' '),reason,at=clock)
             self.reconcile(db,cid)
+            self.wake(self.extraction_wake)
+            self.wake(self.runs_wake)
 
     def tick(self):
         with self.store.connect() as db:
@@ -377,10 +390,20 @@ class Harness:
                 self.log(db,job['customer'],'Reminder ready','Eligibility rechecked. Ready for a user-started call.',at=at)
             return len(jobs)
 
+    def wake(self, event):
+        # Some API handlers run in FastAPI's thread pool.
+        if self._worker_loop is not None:
+            self._worker_loop.call_soon_threadsafe(event.set)
+        else:
+            event.set()
+
     async def upstream(self, method, path, body=None, auth=True):
         if auth and not self.api_key:raise HTTPException(409,'RUMIK_API_KEY is missing from the server environment.')
         try:
-            async with httpx.AsyncClient(timeout=40) as client:
+            async with contextlib.AsyncExitStack() as stack:
+                client = self._upstream_client
+                if client is None:
+                    client = await stack.enter_async_context(httpx.AsyncClient(timeout=40))
                 r=await client.request(method,'https://silk-api.rumik.ai'+path,json=body,headers={'Authorization':'Bearer '+self.api_key} if auth else {})
             if r.status_code>=400:
                 detail=f'Rumik returned HTTP {r.status_code}. Check your key, deployed agent, phone access, credit and current tool tunnel. No automatic retry was made.'
@@ -415,6 +438,7 @@ class Harness:
                 if not loaded:
                     raise HTTPException(502,'Asha did not retrieve this customer. Audio has been blocked to prevent an empty conversation. Check the tool service and its public URL; this attempt will be checked before retrying.')
                 result['context_loaded']=True
+                self.wake(self.poll_wake)
                 return result
             except Exception:
                 # An uncertain network failure is not proof that the call failed. Poll its ID.
@@ -437,6 +461,7 @@ class Harness:
                 raise HTTPException(502,'Phone call identity did not match. The attempt is held for checking.')
             db.execute('UPDATE dispatches SET call_id=? WHERE token=?',(provider_id,row['token']))
             db.execute("UPDATE demo_calls SET id=?,status='calling' WHERE id=?",(provider_id,local_id))
+            self.wake(self.poll_wake)
             return db.execute('SELECT * FROM demo_calls WHERE id=?',(provider_id,)).fetchone()
 
     async def phone(self, body, *, run_id='',expected_due=None):
@@ -478,6 +503,7 @@ class Harness:
                 with self.store.connect() as db:
                     db.execute("UPDATE demo_calls SET status='uncertain' WHERE id=?",(local_id,))
                     row=db.execute('SELECT * FROM demo_calls WHERE id=?',(local_id,)).fetchone()
+                self.wake(self.poll_wake)
                 return self.phone_result(row,'The dial result is uncertain. Checking Rumik; no automatic redial will be made.')
             with self.store.connect() as db:loaded=self.context_loaded(db,row['id'])
             message='Phone call requested. Answer the phone; connection is not yet confirmed.'
@@ -522,11 +548,18 @@ class Harness:
         except Exception:errors.append('A phone dial result is still being checked. No automatic redial will be made.')
         with self.store.connect() as db:
             calls=db.execute("SELECT id,status,transcript FROM demo_calls WHERE mode='live' AND processed=0 AND (id NOT LIKE 'phone-%' OR status IN (?,?,?)) ORDER BY CASE WHEN status NOT IN (?,?,?) THEN 0 ELSE 1 END,rowid LIMIT 10",(*TERMINAL,*TERMINAL)).fetchall()
-        for call in calls:
+        async def bounded_poll(call):
+            async with contextlib.AsyncExitStack() as stack:
+                if call['status'] in TERMINAL:
+                    await stack.enter_async_context(self._history_slots)
+                await stack.enter_async_context(self._status_slots)
+                await poll_call(call)
+        async def poll_call(call):
             try:
+                self._status_errors.pop(call['id'],None)
                 if call['status'] in TERMINAL and (json.loads(call['transcript']) or call['status']!='completed'):
                     self.process(call['id'])
-                    continue
+                    return
                 result=await self.upstream('GET','/v1/calls/'+call['id'])
                 status=result.get('status','starting')
                 with self.store.connect() as db:
@@ -538,11 +571,21 @@ class Harness:
                         db.execute("UPDATE demo_calls SET finished_at=? WHERE id=? AND finished_at=''",(result.get('endedAt') or now().isoformat(),call['id']))
                         finished=db.execute('SELECT finished_at FROM demo_calls WHERE id=?',(call['id'],)).fetchone()[0]
                     if status=='completed' and not result.get('transcript') and now()<datetime.fromisoformat(finished)+timedelta(seconds=90):
-                        continue
+                        return
                     self.process(call['id'])
-            except HTTPException as exc:errors.append(str(exc.detail))
-            except Exception:errors.append('A call status could not be saved. The server will check it again.')
-        self.poll_error=' '.join(dict.fromkeys(errors))
+            except HTTPException as exc:self._status_errors[call['id']]=str(exc.detail)
+            except Exception:self._status_errors[call['id']]='A call status could not be saved. The server will check it again.'
+        for call in calls:
+            prior=self._call_polls.get(call['id'])
+            if prior is None or prior.done():
+                self._call_polls[call['id']]=asyncio.create_task(bounded_poll(call))
+        # Let fast reads finish, but keep slow reads in flight across poll cycles.
+        # Each call has one request at a time, so a historical transcript cannot
+        # delay the next status check for an active call.
+        pending={task for task in self._call_polls.values() if not task.done()}
+        if pending:await asyncio.wait(pending,timeout=.25)
+        self._call_polls={cid:task for cid,task in self._call_polls.items() if not task.done()}
+        self.poll_error=' '.join(dict.fromkeys([*errors,*self._status_errors.values()]))
 
 
 def create_harness(path,tool_token,api_key='',background=True,gemini_key='',gemini_model=None,
@@ -551,35 +594,55 @@ def create_harness(path,tool_token,api_key='',background=True,gemini_key='',gemi
     harness=Harness(path,tool_token,api_key,gemini_key,gemini_model,from_number)
     @contextlib.asynccontextmanager
     async def lifespan(app):
+        async def wait_for_work(event, timeout):
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(event.wait(),timeout)
+
         async def poll_worker():
             while True:
+                harness.poll_wake.clear()
                 try:
                     await harness.poll()
                     harness.tick()
                 except Exception:
                     harness.poll_error='Call-status processing encountered an error and will retry.'
-                await asyncio.sleep(3)
+                with harness.store.connect() as db:
+                    active=db.execute("SELECT 1 FROM demo_calls WHERE mode='live' AND status NOT IN (?,?,?)",TERMINAL).fetchone()
+                await wait_for_work(harness.poll_wake,1 if active else 5)
+
         async def extraction_worker():
             import logging
             while True:
+                harness.extraction_wake.clear()
                 try:
                     harness.extraction.discover()
                     await harness.extraction.run_next()
                 except Exception:
                     logging.getLogger(__name__).exception('Background extraction failed; call processing remains available.')
-                await asyncio.sleep(1)
+                await wait_for_work(harness.extraction_wake,1)
+
         async def reminder_worker():
             import logging
             while True:
+                harness.runs_wake.clear()
                 try:await harness.runs.step()
                 except Exception:logging.getLogger(__name__).exception('Reminder run will recover using its saved call request.')
-                await asyncio.sleep(2)
-        tasks=[asyncio.create_task(poll_worker()),asyncio.create_task(extraction_worker()),asyncio.create_task(reminder_worker())] if background else []
-        try:yield
-        finally:
-            for task in tasks:task.cancel()
-            for task in tasks:
-                with contextlib.suppress(asyncio.CancelledError):await task
+                await wait_for_work(harness.runs_wake,2)
+
+        async with httpx.AsyncClient(timeout=40,follow_redirects=False) as client:
+            harness._worker_loop=asyncio.get_running_loop()
+            harness._upstream_client=client
+            tasks=[asyncio.create_task(poll_worker()),asyncio.create_task(extraction_worker()),asyncio.create_task(reminder_worker())] if background else []
+            try:yield
+            finally:
+                for task in tasks:task.cancel()
+                await asyncio.gather(*tasks,return_exceptions=True)
+                pending=list(harness._call_polls.values())
+                for task in pending:task.cancel()
+                await asyncio.gather(*pending,return_exceptions=True)
+                harness._call_polls.clear()
+                harness._upstream_client=None
+                harness._worker_loop=None
     app=FastAPI(title='Asha Demo Console',lifespan=lifespan,docs_url=None,redoc_url=None,openapi_url=None)
     app.state.harness=harness
     @app.middleware('http')

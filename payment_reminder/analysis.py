@@ -105,7 +105,12 @@ def validate(result, source):
             raise TemporaryFailure('Extracted evidence does not match the transcript.')
     def supported(kind,customer_only=False):
         return any(e.supports==kind and (not customer_only or turns[e.turn]['role']=='user') for e in result.evidence)
-    if result.outcome!='unreachable' and not supported('outcome',customer_only=True):
+    if result.outcome=='no_commitment' and not supported('outcome',customer_only=True):
+        # The absence of a confirmed plan is not a positive customer assertion.
+        # Do not retry a model request just to invent a quote for that absence.
+        result.summary='No confirmed payment plan was established in the available transcript.'
+        result.next_step='Follow up on the next working day.'
+    elif result.outcome!='unreachable' and not supported('outcome',customer_only=True):
         raise TemporaryFailure('The extracted outcome lacks customer evidence.')
     for populated, kind in ((result.promised_amount,'amount'),
         (result.payment_date_start or result.payment_date_end or result.payment_timeframe,'payment_window'),
@@ -192,6 +197,7 @@ class ConversationAnalysis:
                 VALUES(?,?,?,?) ON CONFLICT(call_id) DO UPDATE SET status=excluded.status,
                 input_json=excluded.input_json,attempts=0,error='',next_attempt_at='',completed_at=NULL''',
                 (call_id,status,json.dumps(source,ensure_ascii=False),now().isoformat()))
+            self.h.wake(self.h.extraction_wake)
             return {'status':status}
 
     def discover(self):
@@ -227,6 +233,9 @@ class ConversationAnalysis:
                     db.execute('INSERT INTO conversation_analysis_attempts(call_id,attempt,error,created_at) VALUES(?,?,?,?)',(row['call_id'],attempt,message,now().isoformat()))
                     db.execute('UPDATE conversation_analyses SET status=?,error=?,next_attempt_at=? WHERE call_id=?',('retry_wait' if retrying else 'failed',message,next_at,row['call_id']))
                 LOG.warning('Conversation analysis %s: %s',row['call_id'],message)
+            finally:
+                self.h.wake(self.h.runs_wake)
+                self.h.wake(self.h.extraction_wake)
 
     def apply(self,call_id,result,metadata):
         from payment_reminder.harness import IST,HOLD

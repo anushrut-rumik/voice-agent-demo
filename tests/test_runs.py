@@ -75,6 +75,29 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         await restored.runs.step();restored.phone.assert_not_awaited()
         self.assertEqual(self.snapshot()['run']['total'],3)
 
+    async def test_next_number_does_not_wait_for_previous_brief(self):
+        await self.start();await self.r.step()
+        cid=self.dials[-1][0]
+        self.remote[cid]={'status':'completed','transcript':[{'role':'user','content':'Not sure yet.'}]}
+        await self.h.poll();self.h.extraction.discover()
+        await self.r.step()
+        items=self.snapshot()['run']['items']
+        self.assertEqual(items[0]['status'],'summarizing')
+        self.assertEqual(len(self.dials),2)
+        self.assertNotEqual(self.dials[0][1]['toNumber'],self.dials[1][1]['toNumber'])
+        await self.r.step();self.assertEqual(len(self.dials),2)
+
+    async def test_pending_brief_holds_same_number_but_not_other_numbers(self):
+        self.r.contact('priya','+12025550101')
+        await self.start();await self.r.step()
+        cid=self.dials[-1][0]
+        self.remote[cid]={'status':'completed','transcript':[{'role':'user','content':'Not sure yet.'}]}
+        await self.h.poll();self.h.extraction.discover();await self.r.step()
+        self.assertEqual([d[2]['customer_name'] for d in self.dials],['Rahul Sharma','Arjun Patel'])
+        await self.finish();await self.r.step()
+        # finish() saved Rahul's earlier queued brief. Priya is now safe to call.
+        self.assertEqual(self.dials[-1][2]['customer_name'],'Priya Mehta')
+
     async def test_individual_call_can_repeat_before_the_next_follow_up(self):
         body=RunRequest(request_id=uuid4(),customer_id='rahul')
         await self.r.start(body);await self.r.step();await self.finish();await self.r.step()

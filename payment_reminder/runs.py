@@ -144,6 +144,7 @@ class ReminderRuns:
                 for customer in due:
                     db.execute('''INSERT INTO reminder_run_items(id,run_id,customer,phone,job_due_at,status,request_id)
                         VALUES(?,?,?,?,?,'queued',?)''',(str(uuid4()),rid,customer['id'],customer['phone'],customer['due_at'],str(uuid4())))
+                self.h.wake(self.h.runs_wake)
                 return {'id':rid,'status':'running','queued':len(due)}
 
     async def control(self, rid, action):
@@ -160,6 +161,7 @@ class ReminderRuns:
             else:
                 db.execute('UPDATE reminder_runs SET status=?,error=?,setup_checked=0 WHERE id=?',
                            ('paused' if action=='pause' else 'running','',rid))
+            self.h.wake(self.h.runs_wake)
             return {'status':'stopping' if action=='cancel' else 'paused' if action=='pause' else 'running'}
 
     async def check_setup(self):
@@ -192,11 +194,16 @@ class ReminderRuns:
                     db.execute("UPDATE reminder_runs SET status='completed',finished_at=? WHERE id=?",(now().isoformat(),run['id']))
                     return
                 if run['status'] != 'running':return
-                if any(r['status'] in ('calling','uncertain','summarizing') for r in remaining):return
+                if any(r['status'] in ('calling','uncertain') for r in remaining):return
                 at=self.h.clock(db)
                 if at < datetime.fromisoformat(run['starts_at']):return
                 if db.execute('SELECT 1 FROM demo_calls WHERE status NOT IN (?,?,?)',TERMINAL).fetchone():return
-                next_item=next((r for r in remaining if r['status'] in ('queued','dialing')),None)
+                # A different number can be called while the last brief is saved.
+                # Keep the same number behind that brief: it may contain a stop
+                # request even when the voice agent never saved an outcome tool.
+                pending_numbers={r['phone'] for r in remaining if r['status']=='summarizing'}
+                next_item=next((r for r in remaining if r['status'] in ('queued','dialing')
+                                and r['phone'] not in pending_numbers),None)
                 if not next_item:return
                 customer=self.h.customer(db,next_item['customer'])
                 job=db.execute('SELECT * FROM demo_jobs WHERE customer=?',(customer['id'],)).fetchone()
@@ -209,6 +216,7 @@ class ReminderRuns:
                     and not db.execute('SELECT 1 FROM contact_blocks WHERE business=? AND phone=?',('demo-supplies',next_item['phone'])).fetchone())
                 if not call and not eligible:
                     db.execute("UPDATE reminder_run_items SET status='skipped',error='Account, contact or schedule changed before calling.' WHERE id=?",(next_item['id'],))
+                    self.h.wake(self.h.runs_wake)
                     return
             if not run['setup_checked']:
                 try:await self.check_setup()

@@ -5,9 +5,34 @@ const fs=require('node:fs');
 function consoleContext(){
  const elements=new Map();
  const document={querySelector(s){if(!elements.has(s))elements.set(s,{dataset:{},classList:{toggle(){},add(){},remove(){}},addEventListener(){},pause(){},removeAttribute(){},close(){},value:''});return elements.get(s);},addEventListener(){}};
- const context=vm.createContext({document,Intl,Date,Map,setInterval(){},fetch:()=>new Promise(()=>{}),assert});
+ const context=vm.createContext({document,Intl,Date,Map,setTimeout(){},setInterval(){},fetch:()=>new Promise(()=>{}),assert});
  vm.runInContext(fs.readFileSync('static/app.js','utf8'),context);return context;
 }
+test('state refreshes coalesce and a mutation gets a subsequent fresh read',async()=>{
+ const c=consoleContext();await vm.runInContext(`(async()=>{
+  refreshPending=null;render=()=>{};let reads=0,release;
+  api=async()=>{reads++;if(reads===1)await new Promise(resolve=>{release=resolve;});return {version:reads};};
+  const first=refresh(),second=refresh(),afterMutation=refresh(true);
+  assert.equal(reads,1);release();await Promise.all([first,second,afterMutation]);
+  assert.equal(reads,2);assert.equal(state.version,2);assert.equal(refreshPending,null);
+ })()`,c);
+});
+test('refresh cadence follows activity and visibility',()=>{
+ const c=consoleContext();vm.runInContext(`
+  state={customers:[],reminders:{run:null}};assert.equal(refreshDelay(),3000);
+  state.reminders.run={status:'running'};assert.equal(refreshDelay(),1000);
+  state.reminders.run=null;state.customers=[{calls:[{status:'calling'}]}];assert.equal(refreshDelay(),1000);
+  document.hidden=true;assert.equal(refreshDelay(),15000);
+ `,c);
+});
+test('run status shows the active call while an older brief is pending',()=>{
+ const c=consoleContext();vm.runInContext(`
+  state={clock:'2026-10-23T11:00:00+05:30',customers:[],reminders:{run:{status:'running',setup_checked:1,
+   starts_at:'2026-10-23T10:00:00+05:30',finished:0,total:2,items:[
+    {status:'summarizing',name:'Earlier customer'},{status:'calling',name:'Current customer'}]}}};
+  renderRun();assert.match(document.querySelector('#run-description').textContent,/Calling Current customer/);
+ `,c);
+});
 test('starting a reminder run submits one stable request and never requests browser audio',async()=>{
  const c=consoleContext();await vm.runInContext(`(async()=>{
   let ids=0,attempts=[];crypto={randomUUID:()=> 'request-'+(++ids)};state={reminders:{ready_count:2,configured:true,run:null}};
